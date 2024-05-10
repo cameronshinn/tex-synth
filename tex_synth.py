@@ -1,3 +1,4 @@
+import argparse
 from PIL import Image
 import numpy as np
 from skimage.util import view_as_windows
@@ -7,35 +8,31 @@ import torch
 from torch.nn import functional as F
 from tqdm import tqdm
 
-W = 15
-GAUSSIAN_STD = 0.3
-EPS = 0.001
+WINDOW_SIZE = 15
 SEED_PATCH_SIZE = 7
-SYNTH_IMG_RES = [400, 400]
-# SYNTH_IMG_RES = [50, 50]
+EPS = 0.001
+GAUSSIAN_STD = 0.3
+
+parser = argparse.ArgumentParser(
+    prog='python tex_synth.py',
+    description='Performs texture synthesis by non-parametric sampling. Generates a new image from a source image by replicating the observed patterns.',
+)
+parser.add_argument('in_image', help='path to source image')
+parser.add_argument('out_image', help='path to save synthesized output image to')
+parser.add_argument('-r', '--resolution', nargs=2, required=True, metavar=('height', 'width'), help='resolution of output image')
+parser.add_argument('-w', '--window-size', type=int, default=WINDOW_SIZE, metavar='size', help='size of square sampling window taken over input image')
+parser.add_argument('-s', '--seed-patch-size', type=int, default=SEED_PATCH_SIZE, metavar='size', help='size of starting point patch, sampled from input image')
+parser.add_argument('-e', '--epsilon', type=float, default=EPS, metavar='eps', help='distance threshold from closest window to sample other windows from')
+parser.add_argument('-d', '--gaussian-std', type=float, default=GAUSSIAN_STD, metavar='std', help='gaussian standard deviation for centered window distance weighting')
+parser.add_argument('-g', '--use-gpu', action='store_true', help='enable GPU usage by PyTorch')
+
 
 def gaussian_kernel_2d(size, std=1):
-    # std = size * 0.2
     std = size * std  # Make width/height of kernel be 1 standard deviation
     g1 = torch.signal.windows.gaussian(size, std=std).reshape(-1, 1)
     g2 = torch.signal.windows.gaussian(size, std=std).reshape(1, -1)
     gauss_2d = g1 @ g2
     return gauss_2d
-
-
-# def dist_func(p, samples, gaussian_std=1, mask=None):
-#     assert len(p.shape) == 2
-#     assert len(samples.shape) == 3
-#     assert p.shape[0] % 2 == 1
-#     assert p.shape[1] % 2 == 1
-#     if mask == None:
-#         mask = torch.ones(p.shape).bool()  # Full mask by default
-#     assert mask.shape == p.shape
-#     sq_dists = (samples - p)**2
-#     sq_dists = sq_dists.nan_to_num(nan=0)  # Synth window will have many NANs in it
-#     gaussian_weighted = sq_dists * gaussian_kernel_2d(sq_dists.shape[-1], std=gaussian_std)
-#     masked = gaussian_weighted * mask / mask.sum()  # Scale distance by the number of dimensions used
-#     return masked.sum((-2, -1))
 
 
 def dist_func(p, samples, gaussian_std=1, mask=None):
@@ -103,21 +100,6 @@ def square_spiral_iterator(center_box_len, boundary_shape):
         x += dx
 
 
-# def get_window(image, center_point, window_shape):
-#     assert window_shape[0] % 2 == 1 and window_shape[1] % 2 == 1
-
-#     padding_left = window_shape[1] // 2
-#     padding_right = window_shape[1] // 2
-#     padding_top = window_shape[0] // 2
-#     padding_bottom = window_shape[0] // 2
-
-#     pad_image = F.pad(image, (padding_left, padding_right, padding_top, padding_bottom), value=float('nan'))
-
-#     return pad_image[
-#         center_point[0]:center_point[0]+window_shape[0],
-#         center_point[1]:center_point[1]+window_shape[1]
-#     ]
-
 def get_window(image, center_point, window_shape):
     assert len(image.shape) == 3
     assert window_shape[0] % 2 == 1 and window_shape[1] % 2 == 1
@@ -129,12 +111,6 @@ def get_window(image, center_point, window_shape):
 
     pad_image = F.pad(image, (0, 0, padding_left, padding_right, padding_top, padding_bottom), value=float('nan'))
 
-    # # TODO: Adjust coordinates to work on padded image
-    # top = center_point[0] - window_shape[0] // 2
-    # bottom = center_point[0] + window_shape[0] // 2
-    # left = center_point[1] - window_shape[1] // 2
-    # right = center_point[1] + window_shape[1] // 2
-
     return pad_image[
         center_point[0]:center_point[0]+window_shape[0],
         center_point[1]:center_point[1]+window_shape[1]
@@ -142,57 +118,67 @@ def get_window(image, center_point, window_shape):
 
 
 def main():
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
+    args = parser.parse_args()
+    input_file = args.in_image
+    output_file = args.out_image
+    synth_img_res = args.resolution
+    window_size = args.window_size
+    seed_patch_size = args.seed_patch_size
+    eps = args.epsilon
+    gaussian_std = args.gaussian_std
+    use_gpu = args.use_gpu
 
-    torch.set_default_device('cuda')
+    if use_gpu:
+        torch.set_default_device('cuda')
 
     # Read and preprocess image
     img = Image.open(input_file)
-    img = torch.from_numpy(np.array(img)).cuda() / 255  # Change to torch tensor and scale 0-1
+    img = torch.from_numpy(np.array(img)) / 255  # Change to torch tensor and scale 0-1
+    if use_gpu:
+        img = img.cuda()
     img = img[:, :, :3]  # Remove alpha channel
 
     # Get windows of source image
     img_4d = img.permute(2, 0, 1).unsqueeze(0)  # Unfold requires a batch dimension
-    img_windows = F.unfold(img_4d, (W, W)).squeeze()  # Remove batch dimension after unfold
-    img_windows = img_windows.reshape(3, W, W, -1).permute(3, 1, 2, 0)  # Reassemble into L, H, W, C patches
+    img_windows = F.unfold(img_4d, (window_size, window_size)).squeeze()  # Remove batch dimension after unfold
+    img_windows = img_windows.reshape(3, window_size, window_size, -1).permute(3, 1, 2, 0)  # Reassemble into L, H, W, C patches
 
     # Generate seed center patch for image synthesis
     patch_top_left = (
-        torch.randint(img.shape[0] - SEED_PATCH_SIZE, (1,)).item(),
-        torch.randint(img.shape[1] - SEED_PATCH_SIZE, (1,)).item()
+        torch.randint(img.shape[0] - seed_patch_size, (1,)).item(),
+        torch.randint(img.shape[1] - seed_patch_size, (1,)).item()
     )
 
     y0, x0 = patch_top_left
-    y1 = y0 + SEED_PATCH_SIZE
-    x1 = x0 + SEED_PATCH_SIZE
+    y1 = y0 + seed_patch_size
+    x1 = x0 + seed_patch_size
     seed_patch = img[y0:y1, x0:x1]
 
     # Create synthetic image tensor and fill in seed patch
-    synth_img = torch.empty(SYNTH_IMG_RES + [3]).fill_(float('nan'))  # Empty RGB image
-    seed_patch_top = SYNTH_IMG_RES[0] // 2 - SEED_PATCH_SIZE // 2
-    seed_patch_left = SYNTH_IMG_RES[1] // 2 - SEED_PATCH_SIZE // 2
-    synth_img[seed_patch_top:seed_patch_top+SEED_PATCH_SIZE,seed_patch_left:seed_patch_left+SEED_PATCH_SIZE, :] = seed_patch
+    synth_img = torch.empty(synth_img_res + [3]).fill_(float('nan'))  # Empty RGB image
+    seed_patch_top = synth_img_res[0] // 2 - seed_patch_size // 2
+    seed_patch_left = synth_img_res[1] // 2 - seed_patch_size // 2
+    synth_img[seed_patch_top:seed_patch_top+seed_patch_size,seed_patch_left:seed_patch_left+seed_patch_size, :] = seed_patch
 
     num_close = []
-    total = SYNTH_IMG_RES[0] * SYNTH_IMG_RES[1] - SEED_PATCH_SIZE**2
+    total = synth_img_res[0] * synth_img_res[1] - seed_patch_size**2
 
-    for y, x in tqdm(square_spiral_iterator(SEED_PATCH_SIZE, SYNTH_IMG_RES), total=total):
-        y += SYNTH_IMG_RES[0] // 2
-        x += SYNTH_IMG_RES[1] // 2
+    for y, x in tqdm(square_spiral_iterator(seed_patch_size, synth_img_res), total=total):
+        y += synth_img_res[0] // 2
+        x += synth_img_res[1] // 2
 
-        synth_window = get_window(synth_img, (y, x), (W, W))
+        synth_window = get_window(synth_img, (y, x), (window_size, window_size))
         mask = synth_window.isnan().logical_not()
-        mask[W//2, W//2] = False  # Mask out center pixel since that's what we are predicting (it should be anyways)
+        mask[window_size//2, window_size//2] = False  # Mask out center pixel since that's what we are predicting (it should be anyways)
 
         # Find closest window
-        distances = dist_func(synth_window, img_windows, gaussian_std=GAUSSIAN_STD, mask=mask)
+        distances = dist_func(synth_window, img_windows, gaussian_std=gaussian_std, mask=mask)
         _, sorted_indices = torch.sort(distances)
         closest_window = img_windows[sorted_indices[0]]
 
         # Find close windows to closest window
-        distances = dist_func(closest_window, img_windows, gaussian_std=GAUSSIAN_STD)
-        is_close = distances < EPS
+        distances = dist_func(closest_window, img_windows, gaussian_std=gaussian_std)
+        is_close = distances < eps
         close_windows = img_windows[is_close, :, :, :]
 
         num_close.append(is_close.sum().item())
@@ -201,82 +187,11 @@ def main():
         sampled_window_idx, _ = sample_with_p(torch.arange(is_close.sum()), prob)
         sampled_window = close_windows[sampled_window_idx, :, :, :].squeeze()  # Remove sampled dimension
 
-        synth_img[y, x, :] = sampled_window[int(W//2), int(W//2), :]  # Use center pixel from selected window
+        synth_img[y, x, :] = sampled_window[int(window_size//2), int(window_size//2), :]  # Use center pixel from selected window
 
     synth_img = (synth_img * 255).to('cpu', dtype=torch.uint8)
     img_out = Image.fromarray(synth_img.detach().numpy())
-    # img_out.convert('L')
     img_out.save(output_file)
-
-
-
-# def main():
-#     input_file = sys.argv[1]
-#     output_file = sys.argv[2]
-
-#     torch.set_default_device('cuda')
-
-#     # Read and preprocess image
-#     img = Image.open(input_file)
-#     img = img.convert('L')  # Convert to grayscale for now
-#     img = torch.from_numpy(np.array(img)).cuda() / 255  # Change to torch tensor and scale 0-1
-
-#     # Get windows of source image
-#     img_4d = img[None, None, :, :]  # Unfold only accepts 4D tensors
-#     img_windows = F.unfold(img_4d, (W, W))[0,:,:]
-#     img_windows = img_windows.transpose(1, 0).reshape(-1, W, W)
-
-#     # Generate seed center patch for image synthesis
-#     patch_top_left = (
-#         torch.randint(img.shape[0] - SEED_PATCH_SIZE, (1,)).item(),
-#         torch.randint(img.shape[1] - SEED_PATCH_SIZE, (1,)).item()
-#     )
-
-#     y0, x0 = patch_top_left
-#     y1 = y0 + SEED_PATCH_SIZE
-#     x1 = x0 + SEED_PATCH_SIZE
-#     seed_patch = img[y0:y1, x0:x1]
-
-#     # Create synthetic image tensor and fill in seed patch
-#     synth_img = torch.empty(SYNTH_IMG_RES).fill_(float('nan'))
-#     seed_patch_top = SYNTH_IMG_RES[0] // 2 - SEED_PATCH_SIZE // 2
-#     seed_patch_left = SYNTH_IMG_RES[1] // 2 - SEED_PATCH_SIZE // 2
-#     synth_img[seed_patch_top:seed_patch_top+SEED_PATCH_SIZE,seed_patch_left:seed_patch_left+SEED_PATCH_SIZE] = seed_patch
-#     idx = (synth_img.shape[0] // 2 - SEED_PATCH_SIZE // 2, synth_img.shape[1] // 2 - SEED_PATCH_SIZE // 2)
-
-#     num_close = []
-#     total = SYNTH_IMG_RES[0] * SYNTH_IMG_RES[1] - SEED_PATCH_SIZE**2
-
-#     for y, x in tqdm(square_spiral_iterator(SEED_PATCH_SIZE, SYNTH_IMG_RES), total=total):
-#         y += SYNTH_IMG_RES[0] // 2
-#         x += SYNTH_IMG_RES[1] // 2
-
-#         synth_window = get_window(synth_img, (y, x), (W, W))
-#         mask = synth_window.isnan().logical_not()
-#         mask[W//2, W//2] = False  # Mask out center pixel since that's what we are predicting (it should be anyways)
-
-#         # Find closest window
-#         distances = dist_func(synth_window, img_windows, gaussian_std=GAUSSIAN_STD, mask=mask)
-#         _, sorted_indices = torch.sort(distances)
-#         closest_window = img_windows[sorted_indices[0]]
-
-#         # Find close windows to closest window
-#         distances = dist_func(closest_window, img_windows, gaussian_std=GAUSSIAN_STD)
-#         is_close = distances < EPS
-#         close_windows = img_windows[is_close, :, :]
-
-#         num_close.append(is_close.sum().item())
-
-#         prob = torch.ones(is_close.sum()) / is_close.sum()  # equal likelihood
-#         sampled_window_idx, _ = sample_with_p(torch.arange(is_close.sum()), prob)
-#         sampled_window = close_windows[sampled_window_idx, :, :].squeeze()  # Remove sampled dimension
-
-#         synth_img[y, x] = sampled_window[int(W//2), int(W//2)]  # Use center pixel from selected window
-
-#     synth_img = (synth_img * 255).to('cpu', dtype=torch.uint8)
-#     img_out = Image.fromarray(synth_img.detach().numpy())
-#     # img_out.convert('L')
-#     img_out.save(output_file)
 
 
 if __name__ == '__main__':
