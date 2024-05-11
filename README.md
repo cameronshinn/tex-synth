@@ -1,5 +1,33 @@
 # Non-Parametric Texture Synthesis
 
+<div class="row">
+    <div class="column">
+        <figure>
+            <img src="textures/9.png" alt="source texture" width="200" height="200" class="top"/>
+            <figcaption>Source texture</figcaption>
+        </figure>
+    </div>
+    <div class="column">
+        <figure>
+            <img src="synthesized/9.png" alt="synthesized texture" width="200" height="200"/>
+            <figcaption>Synthesized texture</figcaption>
+        </figure>
+    </div>
+</div>
+
+
+<!-- <figure>
+    <img src="textures/1.png" alt="source texture" width="200" height="200" class="top"/>
+    <figcaption>Source texture</figcaption>
+</figure>
+<figure>
+    <img src="synthesized/1.png" alt="synthesized texture" width="200" height="200"/>
+    <figcaption>Synthesized texture</figcaption>
+</figure> -->
+
+
+
+
 We implemented a method of non-parametric texture synthesis which is able to reproduce the patterns of a source image in a new randomly generated image. Our goal was to scale this technique up on large color images with more nuanced patterns, taken from real world images. We found that this method is surprisingly effective on simple real world texture images in most cases, capturing and reproducing the patterns of simple examples. However, some cases required us to tune the parameters to effectively capture the patterns.
 
 This work is a reproduction of Efros and Leung's 1999 paper [Texture Synthesis by Non-parametric Sampling](Texture_synthesis_by_non-parametric_sampling.pdf).
