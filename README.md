@@ -1,32 +1,8 @@
 # Non-Parametric Texture Synthesis
 
-<div class="row">
-    <div class="column">
-        <figure>
-            <img src="textures/9.png" alt="source texture" width="200" height="200" class="top"/>
-            <figcaption>Source texture</figcaption>
-        </figure>
-    </div>
-    <div class="column">
-        <figure>
-            <img src="synthesized/9.png" alt="synthesized texture" width="200" height="200"/>
-            <figcaption>Synthesized texture</figcaption>
-        </figure>
-    </div>
-</div>
-
-
-<!-- <figure>
-    <img src="textures/1.png" alt="source texture" width="200" height="200" class="top"/>
-    <figcaption>Source texture</figcaption>
-</figure>
-<figure>
-    <img src="synthesized/1.png" alt="synthesized texture" width="200" height="200"/>
-    <figcaption>Synthesized texture</figcaption>
-</figure> -->
-
-
-
+|<img src="textures/9.png" alt="source texture" width="200" height="200"/>|<img src="synthesized/9.png" alt="synthesized texture" width="200" height="200"/>|
+|:-:|:-:|
+|Source image|Synthesized output image|
 
 We implemented a method of non-parametric texture synthesis which is able to reproduce the patterns of a source image in a new randomly generated image. Our goal was to scale this technique up on large color images with more nuanced patterns, taken from real world images. We found that this method is surprisingly effective on simple real world texture images in most cases, capturing and reproducing the patterns of simple examples. However, some cases required us to tune the parameters to effectively capture the patterns.
 
@@ -48,7 +24,7 @@ Execute the script like so:
 python tex_synth.py textures/1.png test_out.png --resolution 50 50 --use-gpu
 ```
 
-*Tt is highly recommended to use a GPU to get resonably good looking results*
+*It is highly recommended to use a GPU to get resonably good looking results*
 
 ## Full command line options
 
