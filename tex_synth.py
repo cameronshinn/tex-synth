@@ -7,9 +7,9 @@ import torch
 from torch.nn import functional as F
 from tqdm import tqdm
 
-WINDOW_SIZE = 15
-SEED_PATCH_SIZE = 7
-EPS = 0.001
+WINDOW_SIZE = 7
+SEED_PATCH_SIZE = 3
+EPS = 0.0005
 GAUSSIAN_STD = 0.3
 
 parser = argparse.ArgumentParser(
