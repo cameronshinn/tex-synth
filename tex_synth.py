@@ -3,7 +3,6 @@ from PIL import Image
 import numpy as np
 from skimage.util import view_as_windows
 import matplotlib.pyplot as plt
-import sys
 import torch
 from torch.nn import functional as F
 from tqdm import tqdm
@@ -19,7 +18,7 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument('in_image', help='path to source image')
 parser.add_argument('out_image', help='path to save synthesized output image to')
-parser.add_argument('-r', '--resolution', nargs=2, required=True, metavar=('height', 'width'), help='resolution of output image')
+parser.add_argument('-r', '--resolution', nargs=2, type=int, required=True, metavar=('height', 'width'), help='resolution of output image')
 parser.add_argument('-w', '--window-size', type=int, default=WINDOW_SIZE, metavar='size', help='size of square sampling window taken over input image')
 parser.add_argument('-s', '--seed-patch-size', type=int, default=SEED_PATCH_SIZE, metavar='size', help='size of starting point patch, sampled from input image')
 parser.add_argument('-e', '--epsilon', type=float, default=EPS, metavar='eps', help='distance threshold from closest window to sample other windows from')
@@ -160,9 +159,7 @@ def main():
     seed_patch_left = synth_img_res[1] // 2 - seed_patch_size // 2
     synth_img[seed_patch_top:seed_patch_top+seed_patch_size,seed_patch_left:seed_patch_left+seed_patch_size, :] = seed_patch
 
-    num_close = []
     total = synth_img_res[0] * synth_img_res[1] - seed_patch_size**2
-
     for y, x in tqdm(square_spiral_iterator(seed_patch_size, synth_img_res), total=total):
         y += synth_img_res[0] // 2
         x += synth_img_res[1] // 2
@@ -180,8 +177,6 @@ def main():
         distances = dist_func(closest_window, img_windows, gaussian_std=gaussian_std)
         is_close = distances < eps
         close_windows = img_windows[is_close, :, :, :]
-
-        num_close.append(is_close.sum().item())
 
         prob = torch.ones(is_close.sum()) / is_close.sum()  # equal likelihood
         sampled_window_idx, _ = sample_with_p(torch.arange(is_close.sum()), prob)
